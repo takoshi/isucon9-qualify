@@ -433,19 +433,19 @@ func getConfigByName(name string) (string, error) {
 }
 
 func getPaymentServiceURL() string {
-	val, _ := getConfigByName("payment_service_url")
-	if val == "" {
-		return DefaultPaymentServiceURL
+	host := os.Getenv("PAYMENT_URL")
+	if host == "" {
+		host = DefaultPaymentServiceURL
 	}
-	return val
+	return host
 }
 
 func getShipmentServiceURL() string {
-	val, _ := getConfigByName("shipment_service_url")
-	if val == "" {
-		return DefaultShipmentServiceURL
+	host := os.Getenv("SHIPMENT_URL")
+	if host == "" {
+		host = DefaultShipmentServiceURL
 	}
-	return val
+	return host
 }
 
 func getIndex(w http.ResponseWriter, r *http.Request) {
