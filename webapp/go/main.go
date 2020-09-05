@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/newrelic/go-agent/v3/newrelic"
 	"html/template"
 	"io/ioutil"
 	"log"
@@ -21,6 +22,7 @@ import (
 	goji "goji.io"
 	"goji.io/pat"
 	"golang.org/x/crypto/bcrypt"
+	_ "github.com/newrelic/go-agent/v3/newrelic"
 )
 
 const (
@@ -278,7 +280,17 @@ func init() {
 	))
 }
 
+var app, newrelicErr = newrelic.NewApplication(
+	newrelic.ConfigAppName("isucon9 qual"),
+	newrelic.ConfigLicense(os.Getenv("NEWRELIC_TOKEN")),
+	newrelic.ConfigDistributedTracerEnabled(true),
+)
+
 func main() {
+	if newrelicErr != nil {
+		log.Fatal(newrelicErr)
+	}
+
 	host := os.Getenv("MYSQL_HOST")
 	if host == "" {
 		host = "127.0.0.1"
@@ -320,6 +332,7 @@ func main() {
 	defer dbx.Close()
 
 	mux := goji.NewMux()
+	mux.Use(nrt)
 
 	// API
 	mux.HandleFunc(pat.Post("/initialize"), postInitialize)
@@ -357,6 +370,16 @@ func main() {
 	// Assets
 	mux.Handle(pat.Get("/*"), http.FileServer(http.Dir("../public")))
 	log.Fatal(http.ListenAndServe(":8000", mux))
+}
+
+// Middleware to create/end NewRelic transaction
+func nrt(inner http.Handler) http.Handler {
+	mw := func(w http.ResponseWriter, r *http.Request) {
+		txn := app.StartTransaction(r.URL.Path)
+		inner.ServeHTTP(w, r)
+		txn.End()
+	}
+	return http.HandlerFunc(mw)
 }
 
 func getSession(r *http.Request) *sessions.Session {
