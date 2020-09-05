@@ -379,7 +379,9 @@ func Logger(inner http.Handler) http.Handler {
 		start := time.Now();
 		inner.ServeHTTP(w, r)
 		end := time.Now();
-		log.Print(fmt.Sprintf("%s: %d msec", r.URL.Path, (end.Sub(start)).Milliseconds()))
+		if 200 < (end.Sub(start)).Milliseconds() {
+			log.Print(fmt.Sprintf("%s: %d msec", r.URL.Path, (end.Sub(start)).Milliseconds()))
+		}
 	}
 	return http.HandlerFunc(mw)
 }
@@ -409,6 +411,26 @@ func getCSRFToken(r *http.Request) string {
 	}
 
 	return csrfToken.(string)
+}
+
+func getAddress(r *http.Request) string {
+	session := getSession(r)
+
+	address, ok := session.Values["address"]
+	if !ok {
+		return ""
+	}
+	return address.(string)
+}
+
+func getAccountName(r *http.Request) string {
+	session := getSession(r)
+
+	accountName, ok := session.Values["account_name"]
+	if !ok {
+		return ""
+	}
+	return accountName.(string)
 }
 
 func getTransactionEvidenceByItemIdMap(itemIdList []int64) (transactionEvidenceMap map[int64]TransactionEvidence, error error){
@@ -470,6 +492,24 @@ func getUser(r *http.Request) (user User, errCode int, errMsg string) {
 	if err != nil {
 		log.Print(err)
 		return user, http.StatusInternalServerError, "db error"
+	}
+
+	return user, http.StatusOK, ""
+}
+
+func getUserWithoutNumSellItems(r *http.Request) (user User, errCode int, errMsg string) {
+	session := getSession(r)
+	userID, ok := session.Values["user_id"]
+	if !ok {
+		return user, http.StatusNotFound, "no session"
+	}
+	address := session.Values["address"]
+	accountName := session.Values["account_name"]
+
+	user = User{
+		ID: userID.(int64),
+		AccountName: accountName.(string),
+		Address: address.(string),
 	}
 
 	return user, http.StatusOK, ""
@@ -2351,6 +2391,8 @@ func postLogin(w http.ResponseWriter, r *http.Request) {
 	session := getSession(r)
 
 	session.Values["user_id"] = u.ID
+	session.Values["adress"] = u.Address
+	session.Values["account_name"] = u.AccountName
 	session.Values["csrf_token"] = secureRandomStr(20)
 	if err = session.Save(r, w); err != nil {
 		log.Print(err)
