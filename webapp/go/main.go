@@ -968,6 +968,32 @@ func getUserItems(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(rui)
 }
 
+func getUserSimpleMap(q sqlx.Queryer, userIdList []int64) (userMap map[int64]UserSimple, err error) {
+	if len(userIdList) == 0 {
+		return make(map[int64]UserSimple), nil
+	}
+	userList := []User{}
+	queryString := "SELECT * FROM `users` WHERE `id` IN (?)"
+	query, vs, err := sqlx.In(queryString, userIdList)
+	if err != nil {
+		panic(err)
+	}
+	err = sqlx.Select(q, &userList, query, vs...)
+	if err != nil {
+		return nil, err
+	}
+
+	userMap = make(map[int64]UserSimple)
+	for _, user := range userList {
+		userMap[user.ID] = UserSimple{
+			ID: user.ID,
+			AccountName: user.AccountName,
+			NumSellItems: user.NumSellItems,
+		}
+	}
+	return userMap, nil
+}
+
 func getTransactions(w http.ResponseWriter, r *http.Request) {
 
 	user, errCode, errMsg := getUser(r)
@@ -1061,15 +1087,38 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userUsedMap := make(map[int64]bool)
+	userIDList := []int64{}
+	for _, item := range items {
+		if !userUsedMap[item.SellerID] {
+			userIDList = append(userIDList, item.SellerID)
+			userUsedMap[item.SellerID] = true
+		}
+		if item.BuyerID != 0 && !userUsedMap[item.BuyerID] {
+			userIDList = append(userIDList, item.BuyerID)
+			userUsedMap[item.BuyerID] = true
+		}
+	}
+
+	userMap, err := getUserSimpleMap(tx, userIDList)
+
 	messages := make(chan ItemDetail)
 	var channelCount = 0;
 	for _, item := range items {
-		seller, err := getUserSimpleByID(tx, item.SellerID)
-		if err != nil {
+		//seller, err := getUserSimpleByID(tx, item.SellerID)
+		//if err != nil {
+		//	outputErrorMsg(w, http.StatusNotFound, "seller not found")
+		//	tx.Rollback()
+		//	return
+		//}
+
+		seller, sellerExist := userMap[item.SellerID]
+		if !sellerExist {
 			outputErrorMsg(w, http.StatusNotFound, "seller not found")
 			tx.Rollback()
 			return
 		}
+
 		category, err := getCategoryByID(tx, item.CategoryID)
 		if err != nil {
 			outputErrorMsg(w, http.StatusNotFound, "category not found")
@@ -1097,8 +1146,14 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if item.BuyerID != 0 {
-			buyer, err := getUserSimpleByID(tx, item.BuyerID)
-			if err != nil {
+			//buyer, err := getUserSimpleByID(tx, item.BuyerID)
+			//if err != nil {
+			//	outputErrorMsg(w, http.StatusNotFound, "buyer not found")
+			//	tx.Rollback()
+			//	return
+			//}
+			buyer, buyerExist := userMap[item.BuyerID]
+			if !buyerExist {
 				outputErrorMsg(w, http.StatusNotFound, "buyer not found")
 				tx.Rollback()
 				return
