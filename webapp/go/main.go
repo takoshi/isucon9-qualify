@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/newrelic/go-agent/v3/newrelic"
+	//"github.com/newrelic/go-agent/v3/newrelic"
 	"html/template"
 	"io/ioutil"
 	"log"
@@ -282,16 +282,16 @@ func init() {
 	))
 }
 
-var app, newrelicErr = newrelic.NewApplication(
-	newrelic.ConfigAppName("isucon9 qual"),
-	newrelic.ConfigLicense(os.Getenv("NEWRELIC_TOKEN")),
-	newrelic.ConfigDistributedTracerEnabled(true),
-)
+//var app, newrelicErr = newrelic.NewApplication(
+//	newrelic.ConfigAppName("isucon9 qual"),
+//	newrelic.ConfigLicense(os.Getenv("NEWRELIC_TOKEN")),
+//	newrelic.ConfigDistributedTracerEnabled(true),
+//)
 
 func main() {
-	if newrelicErr != nil {
-		log.Fatal(newrelicErr)
-	}
+	//if newrelicErr != nil {
+	//	log.Fatal(newrelicErr)
+	//}
 
 	host := os.Getenv("MYSQL_HOST")
 	if host == "" {
@@ -334,8 +334,8 @@ func main() {
 	defer dbx.Close()
 
 	mux := goji.NewMux()
-	mux.Use(nrt)
-	mux.Use(Logger)
+	//mux.Use(nrt)
+	//mux.Use(Logger)
 
 	// API
 	mux.HandleFunc(pat.Post("/initialize"), postInitialize)
@@ -388,14 +388,14 @@ func Logger(inner http.Handler) http.Handler {
 }
 
 // Middleware to create/end NewRelic transaction
-func nrt(inner http.Handler) http.Handler {
-	mw := func(w http.ResponseWriter, r *http.Request) {
-		txn := app.StartTransaction(r.URL.Path)
-		inner.ServeHTTP(w, r)
-		txn.End()
-	}
-	return http.HandlerFunc(mw)
-}
+//func nrt(inner http.Handler) http.Handler {
+//	mw := func(w http.ResponseWriter, r *http.Request) {
+//		txn := app.StartTransaction(r.URL.Path)
+//		inner.ServeHTTP(w, r)
+//		txn.End()
+//	}
+//	return http.HandlerFunc(mw)
+//}
 
 func getSession(r *http.Request) *sessions.Session {
 	session, _ := store.Get(r, sessionName)
@@ -1533,7 +1533,6 @@ func getQRCode(w http.ResponseWriter, r *http.Request) {
 
 var buyLock sync.Mutex
 var itemLock = make(map[int64]*sync.Mutex)
-var itemResult = make(map[int64]bool)
 func postBuy(w http.ResponseWriter, r *http.Request) {
 	rb := reqBuy{}
 
@@ -1564,11 +1563,6 @@ func postBuy(w http.ResponseWriter, r *http.Request) {
 	lock.Lock()
 	defer lock.Unlock()
 	buyLock.Unlock()
-
-	if itemResult[rb.ItemID] {
-		outputErrorMsg(w, http.StatusForbidden, "item is not for sale")
-		return
-	}
 
 	tx := dbx.MustBegin()
 
@@ -1784,7 +1778,6 @@ func postBuy(w http.ResponseWriter, r *http.Request) {
 
 	tx.Commit()
 
-	itemResult[rb.ItemID] = true
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")
 	json.NewEncoder(w).Encode(resBuy{TransactionEvidenceID: transactionEvidenceID})
 }
