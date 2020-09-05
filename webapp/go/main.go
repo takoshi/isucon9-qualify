@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"time"
 
@@ -1003,7 +1004,8 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//messages := make(chan ItemDetail)
+	messages := make(chan ItemDetail)
+	var channelCount = 0;
 	for _, item := range items {
 		seller, err := getUserSimpleByID(tx, item.SellerID)
 		if err != nil {
@@ -1080,32 +1082,42 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 			//	tx.Rollback()
 			//	return
 			//}
-			ssr, err := APIShipmentStatus(getShipmentServiceURL(), &APIShipmentStatusReq{
-				ReserveID: shipping.ReserveID,
-			})
-			if err != nil {
-				log.Print(err)
-				outputErrorMsg(w, http.StatusInternalServerError, "failed to request to shipment service")
-				tx.Rollback()
-				return
-			}
 
-			itemDetail.TransactionEvidenceID = transactionEvidence.ID
-			itemDetail.TransactionEvidenceStatus = transactionEvidence.Status
-			itemDetail.ShippingStatus = ssr.Status
+			channelCount++;
+
+			go func(itemDetail ItemDetail, transactionEvidence TransactionEvidence, shipping Shipping) {
+				ssr, err := APIShipmentStatus(getShipmentServiceURL(), &APIShipmentStatusReq{
+					ReserveID: shipping.ReserveID,
+				})
+				if err != nil {
+					log.Print(err)
+					outputErrorMsg(w, http.StatusInternalServerError, "failed to request to shipment service")
+					tx.Rollback()
+					return
+				}
+
+				itemDetail.TransactionEvidenceID = transactionEvidence.ID
+				itemDetail.TransactionEvidenceStatus = transactionEvidence.Status
+				itemDetail.ShippingStatus = ssr.Status
+
+				messages <- itemDetail
+			}(itemDetail, transactionEvidence, shipping)
 		}
 
 		itemDetails = append(itemDetails, itemDetail)
 	}
 
+	for i := 0; i < channelCount; i++ {
+		itemDetails = append(itemDetails, <-messages)
+	}
 
-	//sort.Slice(itemDetails, func(i, j int) bool {
-	//	if itemDetails[i].CreatedAt != itemDetails[j].CreatedAt {
-	//		return itemDetails[i].CreatedAt > itemDetails[j].CreatedAt
-	//	} else {
-	//		return itemDetails[i].ID > itemDetails[j].ID
-	//	}
-	//})
+	sort.Slice(itemDetails, func(i, j int) bool {
+		if itemDetails[i].CreatedAt != itemDetails[j].CreatedAt {
+			return itemDetails[i].CreatedAt > itemDetails[j].CreatedAt
+		} else {
+			return itemDetails[i].ID > itemDetails[j].ID
+		}
+	})
 
 	tx.Commit()
 
