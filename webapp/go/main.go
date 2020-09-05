@@ -1102,6 +1102,8 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 
 				messages <- itemDetail
 			}(itemDetail, transactionEvidence, shipping)
+
+			continue
 		}
 
 		itemDetails = append(itemDetails, itemDetail)
