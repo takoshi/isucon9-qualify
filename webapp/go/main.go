@@ -19,10 +19,10 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
+	_ "github.com/newrelic/go-agent/v3/newrelic"
 	goji "goji.io"
 	"goji.io/pat"
 	"golang.org/x/crypto/bcrypt"
-	_ "github.com/newrelic/go-agent/v3/newrelic"
 )
 
 const (
@@ -399,7 +399,7 @@ func getCSRFToken(r *http.Request) string {
 	return csrfToken.(string)
 }
 
-func getTransactionEvidenceByItemIdList(itemIdList []int64) (transactionEvidenceMap map[int64]TransactionEvidence, error error){
+func getTransactionEvidenceByItemIdMap(itemIdList []int64) (transactionEvidenceMap map[int64]TransactionEvidence, error error){
 	transactionEvidenceList := []TransactionEvidence{}
 	queryString := "SELECT * FROM `transaction_evidences` WHERE `item_id` IN (?)"
 	query, vs, err := sqlx.In(queryString, itemIdList)
@@ -408,7 +408,7 @@ func getTransactionEvidenceByItemIdList(itemIdList []int64) (transactionEvidence
 	}
 	err = dbx.Select(&transactionEvidenceList, query, vs...)
 	if err != nil {
-		return nil, err
+		return make(map[int64]TransactionEvidence), err
 	}
 
 	transactionEvidenceMap = make(map[int64]TransactionEvidence)
@@ -416,6 +416,26 @@ func getTransactionEvidenceByItemIdList(itemIdList []int64) (transactionEvidence
 		transactionEvidenceMap[transactionEvidence.ItemID] = transactionEvidence
 	}
 	return transactionEvidenceMap, nil
+}
+
+func getShippingMapByTransactionEvidenceId(transactionEvidenceIdList []int64) (shippingMap map[int64]Shipping, err error) {
+	shippingList := []Shipping{}
+	queryString := "SELECT * FROM `shippings` WHERE `transaction_evidence_id` IN (?)"
+	query, vs, err := sqlx.In(queryString, transactionEvidenceIdList)
+	if err != nil {
+		panic(err)
+	}
+	err = dbx.Select(&shippingList, query, vs...)
+	if err != nil {
+		return nil, err
+	}
+
+	shippingMap = make(map[int64]Shipping)
+	for _, shipping := range shippingList {
+		shippingMap[shipping.TransactionEvidenceID] = shipping
+	}
+
+	return shippingMap, nil
 }
 
 func getUser(r *http.Request) (user User, errCode int, errMsg string) {
@@ -449,15 +469,26 @@ func getUserSimpleByID(q sqlx.Queryer, userID int64) (userSimple UserSimple, err
 	return userSimple, err
 }
 
+var categoryMap = make(map[int]Category)
 func getCategoryByID(q sqlx.Queryer, categoryID int) (category Category, err error) {
+	if categoryID < 1 || 67 < categoryID {
+		return category, sql.ErrNoRows
+	}
+	category, categoryExist := categoryMap[categoryID]
+	if categoryExist {
+		return category, nil
+	}
+
 	err = sqlx.Get(q, &category, "SELECT * FROM `categories` WHERE `id` = ?", categoryID)
 	if category.ParentID != 0 {
 		parentCategory, err := getCategoryByID(q, category.ParentID)
 		if err != nil {
+			categoryMap[categoryID] = category
 			return category, err
 		}
 		category.ParentCategoryName = parentCategory.CategoryName
 	}
+	categoryMap[categoryID] = category
 	return category, err
 }
 
@@ -950,8 +981,8 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	itemDetails := []ItemDetail{}
-	transactionEvidenceMap, err := getTransactionEvidenceByItemIdList(itemIDList)
-	if err != nil {
+	transactionEvidenceMap, err := getTransactionEvidenceByItemIdMap(itemIDList)
+	if err != nil && err != sql.ErrNoRows {
 		// It's able to ignore ErrNoRows
 		log.Print(err)
 		outputErrorMsg(w, http.StatusInternalServerError, "db error")
@@ -959,6 +990,20 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	transactionEvidenceIdList := []int64{}
+	for _, transactionEvidence := range transactionEvidenceMap {
+		transactionEvidenceIdList = append(transactionEvidenceIdList, transactionEvidence.ID)
+	}
+
+	shippingMap, err := getShippingMapByTransactionEvidenceId(transactionEvidenceIdList)
+	if err != nil {
+		log.Print(err)
+		outputErrorMsg(w, http.StatusInternalServerError, "db error")
+		tx.Rollback()
+		return
+	}
+
+	//messages := make(chan ItemDetail)
 	for _, item := range items {
 		seller, err := getUserSimpleByID(tx, item.SellerID)
 		if err != nil {
@@ -1017,18 +1062,24 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 
 		if transactionEvidence.ID > 0 {
 			shipping := Shipping{}
-			err = tx.Get(&shipping, "SELECT * FROM `shippings` WHERE `transaction_evidence_id` = ?", transactionEvidence.ID)
-			if err == sql.ErrNoRows {
+			shipping, shippingExist := shippingMap[transactionEvidence.ID]
+			if !shippingExist {
 				outputErrorMsg(w, http.StatusNotFound, "shipping not found")
 				tx.Rollback()
 				return
 			}
-			if err != nil {
-				log.Print(err)
-				outputErrorMsg(w, http.StatusInternalServerError, "db error")
-				tx.Rollback()
-				return
-			}
+			//err = tx.Get(&shipping, "SELECT * FROM `shippings` WHERE `transaction_evidence_id` = ?", transactionEvidence.ID)
+			//if err == sql.ErrNoRows {
+			//	outputErrorMsg(w, http.StatusNotFound, "shipping not found")
+			//	tx.Rollback()
+			//	return
+			//}
+			//if err != nil {
+			//	log.Print(err)
+			//	outputErrorMsg(w, http.StatusInternalServerError, "db error")
+			//	tx.Rollback()
+			//	return
+			//}
 			ssr, err := APIShipmentStatus(getShipmentServiceURL(), &APIShipmentStatusReq{
 				ReserveID: shipping.ReserveID,
 			})
@@ -1046,6 +1097,16 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 
 		itemDetails = append(itemDetails, itemDetail)
 	}
+
+
+	//sort.Slice(itemDetails, func(i, j int) bool {
+	//	if itemDetails[i].CreatedAt != itemDetails[j].CreatedAt {
+	//		return itemDetails[i].CreatedAt > itemDetails[j].CreatedAt
+	//	} else {
+	//		return itemDetails[i].ID > itemDetails[j].ID
+	//	}
+	//})
+
 	tx.Commit()
 
 	hasNext := false
