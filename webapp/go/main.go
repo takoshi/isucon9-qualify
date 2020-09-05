@@ -399,6 +399,25 @@ func getCSRFToken(r *http.Request) string {
 	return csrfToken.(string)
 }
 
+func getTransactionEvidenceByItemIdList(itemIdList []int64) (transactionEvidenceMap map[int64]TransactionEvidence, error error){
+	transactionEvidenceList := []TransactionEvidence{}
+	queryString := "SELECT * FROM `transaction_evidences` WHERE `item_id` IN (?)"
+	query, vs, err := sqlx.In(queryString, itemIdList)
+	if err != nil {
+		panic(err)
+	}
+	err = dbx.Select(&transactionEvidenceList, query, vs...)
+	if err != nil {
+		return nil, err
+	}
+
+	transactionEvidenceMap = make(map[int64]TransactionEvidence)
+	for _, transactionEvidence := range transactionEvidenceList {
+		transactionEvidenceMap[transactionEvidence.ItemID] = transactionEvidence
+	}
+	return transactionEvidenceMap, nil
+}
+
 func getUser(r *http.Request) (user User, errCode int, errMsg string) {
 	session := getSession(r)
 	userID, ok := session.Values["user_id"]
@@ -925,7 +944,21 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	itemIDList := []int64{}
+	for _, item := range items {
+		itemIDList = append(itemIDList, item.ID)
+	}
+
 	itemDetails := []ItemDetail{}
+	transactionEvidenceMap, err := getTransactionEvidenceByItemIdList(itemIDList)
+	if err != nil {
+		// It's able to ignore ErrNoRows
+		log.Print(err)
+		outputErrorMsg(w, http.StatusInternalServerError, "db error")
+		tx.Rollback()
+		return
+	}
+
 	for _, item := range items {
 		seller, err := getUserSimpleByID(tx, item.SellerID)
 		if err != nil {
@@ -971,14 +1004,16 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		}
 
 		transactionEvidence := TransactionEvidence{}
-		err = tx.Get(&transactionEvidence, "SELECT * FROM `transaction_evidences` WHERE `item_id` = ?", item.ID)
-		if err != nil && err != sql.ErrNoRows {
-			// It's able to ignore ErrNoRows
-			log.Print(err)
-			outputErrorMsg(w, http.StatusInternalServerError, "db error")
-			tx.Rollback()
-			return
-		}
+		transactionEvidence = transactionEvidenceMap[item.ID]
+
+		//err = tx.Get(&transactionEvidence, "SELECT * FROM `transaction_evidences` WHERE `item_id` = ?", item.ID)
+		//if err != nil && err != sql.ErrNoRows {
+		//	// It's able to ignore ErrNoRows
+		//	log.Print(err)
+		//	outputErrorMsg(w, http.StatusInternalServerError, "db error")
+		//	tx.Rollback()
+		//	return
+		//}
 
 		if transactionEvidence.ID > 0 {
 			shipping := Shipping{}
