@@ -334,6 +334,7 @@ func main() {
 
 	mux := goji.NewMux()
 	mux.Use(nrt)
+	mux.Use(Logger)
 
 	// API
 	mux.HandleFunc(pat.Post("/initialize"), postInitialize)
@@ -371,6 +372,15 @@ func main() {
 	// Assets
 	mux.Handle(pat.Get("/*"), http.FileServer(http.Dir("../public")))
 	log.Fatal(http.ListenAndServe(":8000", mux))
+}
+
+func Logger(inner http.Handler) http.Handler {
+	mw := func(w http.ResponseWriter, r *http.Request) {
+		log.Print(r.URL.Path + ": before")
+		inner.ServeHTTP(w, r)
+		log.Print(r.URL.Path + ": after")
+	}
+	return http.HandlerFunc(mw)
 }
 
 // Middleware to create/end NewRelic transaction
