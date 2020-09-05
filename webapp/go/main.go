@@ -1460,7 +1460,7 @@ func postBuy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	buyer, errCode, errMsg := getUser(r)
+	buyer, errCode, errMsg := getUserWithoutNumSellItems(r)
 	if errMsg != "" {
 		outputErrorMsg(w, errCode, errMsg)
 		return
@@ -1561,33 +1561,83 @@ func postBuy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scr, err := APIShipmentCreate(getShipmentServiceURL(), &APIShipmentCreateReq{
-		ToAddress:   buyer.Address,
-		ToName:      buyer.AccountName,
-		FromAddress: seller.Address,
-		FromName:    seller.AccountName,
-	})
+	type APIShipmentMessageType struct {
+		scr *APIShipmentCreateRes
+		err error
+	}
+	apiShipmentMessage := make(chan APIShipmentMessageType)
+	go func() {
+		scr, err := APIShipmentCreate(getShipmentServiceURL(), &APIShipmentCreateReq{
+			ToAddress:   buyer.Address,
+			ToName:      buyer.AccountName,
+			FromAddress: seller.Address,
+			FromName:    seller.AccountName,
+		})
+		apiShipmentMessage <- APIShipmentMessageType{
+			scr: scr,
+			err: err,
+		}
+	}()
+
+	type APIPaymentTokenMessageType struct {
+		pstr *APIPaymentServiceTokenRes
+		err error
+	}
+	apiPaymentMessage := make(chan APIPaymentTokenMessageType)
+	go func() {
+		pstr, err := APIPaymentToken(getPaymentServiceURL(), &APIPaymentServiceTokenReq{
+			ShopID: PaymentServiceIsucariShopID,
+			Token:  rb.Token,
+			APIKey: PaymentServiceIsucariAPIKey,
+			Price:  targetItem.Price,
+		})
+		apiPaymentMessage <- APIPaymentTokenMessageType{
+			pstr: pstr,
+			err: err,
+		}
+	}()
+	//
+	//scr, err := APIShipmentCreate(getShipmentServiceURL(), &APIShipmentCreateReq{
+	//	ToAddress:   buyer.Address,
+	//	ToName:      buyer.AccountName,
+	//	FromAddress: seller.Address,
+	//	FromName:    seller.AccountName,
+	//})
+	//if err != nil {
+	//	log.Print(err)
+	//	outputErrorMsg(w, http.StatusInternalServerError, "failed to request to shipment service")
+	//	tx.Rollback()
+	//
+	//	return
+	//}
+
+	//pstr, err := APIPaymentToken(getPaymentServiceURL(), &APIPaymentServiceTokenReq{
+	//	ShopID: PaymentServiceIsucariShopID,
+	//	Token:  rb.Token,
+	//	APIKey: PaymentServiceIsucariAPIKey,
+	//	Price:  targetItem.Price,
+	//})
+	//if err != nil {
+	//	log.Print(err)
+	//
+	//	outputErrorMsg(w, http.StatusInternalServerError, "payment service is failed")
+	//	tx.Rollback()
+	//	return
+	//}
+
+	apiShipmentResult := <-apiShipmentMessage
+	scr := apiShipmentResult.scr
+	err = apiShipmentResult.err
 	if err != nil {
 		log.Print(err)
 		outputErrorMsg(w, http.StatusInternalServerError, "failed to request to shipment service")
 		tx.Rollback()
-
 		return
 	}
 
-	pstr, err := APIPaymentToken(getPaymentServiceURL(), &APIPaymentServiceTokenReq{
-		ShopID: PaymentServiceIsucariShopID,
-		Token:  rb.Token,
-		APIKey: PaymentServiceIsucariAPIKey,
-		Price:  targetItem.Price,
-	})
-	if err != nil {
-		log.Print(err)
-
-		outputErrorMsg(w, http.StatusInternalServerError, "payment service is failed")
-		tx.Rollback()
-		return
-	}
+	apiPaymentResult := <-apiPaymentMessage
+	pstr := apiPaymentResult.pstr
+	err = apiPaymentResult.err
 
 	if pstr.Status == "invalid" {
 		outputErrorMsg(w, http.StatusBadRequest, "カード情報に誤りがあります")
@@ -2391,7 +2441,7 @@ func postLogin(w http.ResponseWriter, r *http.Request) {
 	session := getSession(r)
 
 	session.Values["user_id"] = u.ID
-	session.Values["adress"] = u.Address
+	session.Values["address"] = u.Address
 	session.Values["account_name"] = u.AccountName
 	session.Values["csrf_token"] = secureRandomStr(20)
 	if err = session.Save(r, w); err != nil {
