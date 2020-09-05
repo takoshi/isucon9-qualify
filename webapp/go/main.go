@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -1529,6 +1530,10 @@ func getQRCode(w http.ResponseWriter, r *http.Request) {
 	w.Write(shipping.ImgBinary)
 }
 
+
+var buyLock sync.Mutex
+var itemLock = make(map[int64]*sync.Mutex)
+var itemResult = make(map[int64]bool)
 func postBuy(w http.ResponseWriter, r *http.Request) {
 	rb := reqBuy{}
 
@@ -1547,6 +1552,21 @@ func postBuy(w http.ResponseWriter, r *http.Request) {
 	buyer, errCode, errMsg := getUser(r)
 	if errMsg != "" {
 		outputErrorMsg(w, errCode, errMsg)
+		return
+	}
+
+	buyLock.Lock()
+	lock, lockExist := itemLock[rb.ItemID]
+	if !lockExist {
+		lock = &sync.Mutex{}
+		itemLock[rb.ItemID] = lock
+	}
+	lock.Lock()
+	defer lock.Unlock()
+	buyLock.Unlock()
+
+	if itemResult[rb.ItemID] {
+		outputErrorMsg(w, http.StatusForbidden, "item is not for sale")
 		return
 	}
 
@@ -1764,6 +1784,7 @@ func postBuy(w http.ResponseWriter, r *http.Request) {
 
 	tx.Commit()
 
+	itemResult[rb.ItemID] = true
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")
 	json.NewEncoder(w).Encode(resBuy{TransactionEvidenceID: transactionEvidenceID})
 }
