@@ -401,6 +401,9 @@ func getCSRFToken(r *http.Request) string {
 }
 
 func getTransactionEvidenceByItemIdMap(itemIdList []int64) (transactionEvidenceMap map[int64]TransactionEvidence, error error){
+	if len(itemIdList) == 0 {
+		return make(map[int64]TransactionEvidence), nil
+	}
 	transactionEvidenceList := []TransactionEvidence{}
 	queryString := "SELECT * FROM `transaction_evidences` WHERE `item_id` IN (?)"
 	query, vs, err := sqlx.In(queryString, itemIdList)
@@ -420,6 +423,9 @@ func getTransactionEvidenceByItemIdMap(itemIdList []int64) (transactionEvidenceM
 }
 
 func getShippingMapByTransactionEvidenceId(transactionEvidenceIdList []int64) (shippingMap map[int64]Shipping, err error) {
+	if len(transactionEvidenceIdList) == 0 {
+		return make(map[int64]Shipping), nil
+	}
 	shippingList := []Shipping{}
 	queryString := "SELECT * FROM `shippings` WHERE `transaction_evidence_id` IN (?)"
 	query, vs, err := sqlx.In(queryString, transactionEvidenceIdList)
