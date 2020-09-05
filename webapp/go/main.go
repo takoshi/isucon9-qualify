@@ -633,6 +633,20 @@ func postInitialize(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(res)
 }
 
+func getUserMapByItemsSellerID(items []Item) (userMap map[int64]UserSimple) {
+	userUsedMap := make(map[int64]bool)
+	userIDList := []int64{}
+	for _, item := range items {
+		if !userUsedMap[item.SellerID] {
+			userIDList = append(userIDList, item.SellerID)
+			userUsedMap[item.SellerID] = true
+		}
+	}
+
+	userMap, _ = getUserSimpleMap(dbx, userIDList)
+	return userMap
+}
+
 func getNewItems(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	itemIDStr := query.Get("item_id")
@@ -688,13 +702,20 @@ func getNewItems(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	userMap := getUserMapByItemsSellerID(items)
+
 	itemSimples := []ItemSimple{}
 	for _, item := range items {
-		seller, err := getUserSimpleByID(dbx, item.SellerID)
-		if err != nil {
+		seller, sellerExist := userMap[item.SellerID]
+		if !sellerExist {
 			outputErrorMsg(w, http.StatusNotFound, "seller not found")
 			return
 		}
+		//seller, err := getUserSimpleByID(dbx, item.SellerID)
+		//if err != nil {
+		//	outputErrorMsg(w, http.StatusNotFound, "seller not found")
+		//	return
+		//}
 		category, err := getCategoryByID(dbx, item.CategoryID)
 		if err != nil {
 			outputErrorMsg(w, http.StatusNotFound, "category not found")
@@ -816,13 +837,21 @@ func getNewCategoryItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+
+	userMap := getUserMapByItemsSellerID(items)
+
 	itemSimples := []ItemSimple{}
 	for _, item := range items {
-		seller, err := getUserSimpleByID(dbx, item.SellerID)
-		if err != nil {
+		seller, sellerExist := userMap[item.SellerID]
+		if !sellerExist {
 			outputErrorMsg(w, http.StatusNotFound, "seller not found")
 			return
 		}
+		//seller, err := getUserSimpleByID(dbx, item.SellerID)
+		//if err != nil {
+		//	outputErrorMsg(w, http.StatusNotFound, "seller not found")
+		//	return
+		//}
 		category, err := getCategoryByID(dbx, item.CategoryID)
 		if err != nil {
 			outputErrorMsg(w, http.StatusNotFound, "category not found")
