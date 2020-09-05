@@ -376,9 +376,10 @@ func main() {
 
 func Logger(inner http.Handler) http.Handler {
 	mw := func(w http.ResponseWriter, r *http.Request) {
-		log.Print(r.URL.Path + ": before")
+		start := time.Now();
 		inner.ServeHTTP(w, r)
-		log.Print(r.URL.Path + ": after")
+		end := time.Now();
+		log.Print(fmt.Sprintf("%s: %d msec", r.URL.Path, (end.Sub(start)).Milliseconds()))
 	}
 	return http.HandlerFunc(mw)
 }
